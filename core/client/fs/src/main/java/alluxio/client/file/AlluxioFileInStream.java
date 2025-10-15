@@ -168,7 +168,9 @@ public class AlluxioFileInStream extends FileInStream {
           closeBlockInStream(mBlockInStream);
         }
         return result;
+        //TODO 加判断 使用冗余块
       } catch (IOException e) {
+
         lastException = e;
         if (mBlockInStream != null) {
           handleRetryableException(mBlockInStream, e);

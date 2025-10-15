@@ -17,14 +17,17 @@ import alluxio.client.AlluxioStorageType;
 import alluxio.client.UnderStorageType;
 import alluxio.client.block.BlockStoreClient;
 import alluxio.client.block.policy.options.GetWorkerOptions;
+import alluxio.client.block.stream.BlockInStream;
 import alluxio.client.block.stream.BlockOutStream;
 import alluxio.client.block.stream.UnderFileSystemFileOutStream;
+import alluxio.client.file.options.InStreamOptions;
 import alluxio.client.file.options.OutStreamOptions;
 import alluxio.conf.AlluxioConfiguration;
 import alluxio.conf.PropertyKey;
 import alluxio.exception.ExceptionMessage;
 import alluxio.exception.PreconditionMessage;
 import alluxio.exception.status.UnavailableException;
+import alluxio.grpc.Block;
 import alluxio.grpc.CompleteFilePOptions;
 import alluxio.grpc.FileSystemMasterCommonPOptions;
 import alluxio.metrics.MetricKey;
@@ -47,7 +50,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -155,6 +160,8 @@ public class AlluxioFileOutStream extends FileOutStream {
     if (mClosed) {
       return;
     }
+    //TODO 关闭时一起提交冗余块
+
     try (Timer.Context ctx = MetricsSystem
             .uniformTimer(MetricKey.CLOSE_ALLUXIO_OUTSTREAM_LATENCY.getName()).time()) {
       if (mCurrentBlockOutStream != null) {
@@ -261,18 +268,24 @@ public class AlluxioFileOutStream extends FileOutStream {
     mBytesWritten++;
   }
 
+  private List<BlockOutStream> two_tone(List<BlockOutStream>copy){
+    return new ArrayList<>();
+  }
+
   private void writeInternal(byte[] b, int off, int len) throws IOException {
     Preconditions.checkArgument(b != null, PreconditionMessage.ERR_WRITE_BUFFER_NULL);
     Preconditions.checkArgument(off >= 0 && len >= 0 && len + off <= b.length,
         PreconditionMessage.ERR_BUFFER_STATE.toString(), b.length, off, len);
 
+    List<Long>blockIds = new ArrayList<>();
     if (mShouldCacheCurrentBlock) {
       try {
         int tLen = len;
         int tOff = off;
         while (tLen > 0) {
+          //TODO 换新块时保存这些块id,等文件完全写入根据这些id制造冗余块
           if (mCurrentBlockOutStream == null || mCurrentBlockOutStream.remaining() == 0) {
-            getNextBlock();
+            getNextBlock(blockIds);
           }
           long currentBlockLeftBytes = mCurrentBlockOutStream.remaining();
           if (currentBlockLeftBytes >= tLen) {
@@ -288,6 +301,33 @@ public class AlluxioFileOutStream extends FileOutStream {
         handleCacheWriteException(e);
       }
     }
+    //TODO: file已经分块到blockIds里面了,冗余放磁盘,在close方法里面制造冗余块
+    //TODO 或者直接在旧块满时复制一份
+    //TODO 提交冗余块，绑定file
+
+
+
+    //blockOutStream只有写没有读，不能用
+    List<BlockOutStream>copyStreams = new ArrayList<>(mPreviousBlockOutStreams);
+    Map<WorkerNetAddress, Long> mFailedWorkers = new HashMap<>();
+    InStreamOptions inStreamOptions = new InStreamOptions();
+    List<BlockInStream>blockInStreams = new ArrayList<>();
+    for(Long blockId:blockIds) {
+       BlockInStream mBlockInStream = mBlockStore.getInStream(blockId,inStreamOptions , mFailedWorkers);
+       blockInStreams.add(mBlockInStream);
+    }
+
+
+
+
+
+
+
+    if(mCurrentBlockOutStream!=null)copyStreams.add(mCurrentBlockOutStream);
+    //TODO 调api获得冗余块 申请新块和赋值过程和写一样
+    List<BlockOutStream>two_tone_Streams = two_tone(copyStreams);
+    //TODO 提交块
+
 
     if (mUnderStorageType.isSyncPersist()) {
       mUnderStorageOutputStream.write(b, off, len);
@@ -296,7 +336,7 @@ public class AlluxioFileOutStream extends FileOutStream {
     mBytesWritten += len;
   }
 
-  private void getNextBlock() throws IOException {
+  private void getNextBlock(List<Long>blockIds) throws IOException {
     if (mCurrentBlockOutStream != null) {
       Preconditions.checkState(mCurrentBlockOutStream.remaining() <= 0,
           "The current block still has space left, no need to get new block");
@@ -305,8 +345,10 @@ public class AlluxioFileOutStream extends FileOutStream {
     }
 
     if (mAlluxioStorageType.isStore()) {
+      long newId = getNextBlockId();
+      blockIds.add(newId);
       mCurrentBlockOutStream =
-          mBlockStore.getOutStream(getNextBlockId(), mBlockSize, mOptions);
+          mBlockStore.getOutStream(newId, mBlockSize, mOptions);
       mShouldCacheCurrentBlock = true;
     }
   }
