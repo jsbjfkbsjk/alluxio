@@ -68,7 +68,7 @@ import javax.annotation.concurrent.ThreadSafe;
 @NotThreadSafe
 public class AlluxioFileOutStream extends FileOutStream {
   private static final Logger LOG = LoggerFactory.getLogger(AlluxioFileOutStream.class);
-
+  private final Native_TWO_TONE nativeTwoTone;
   /** Used to manage closeable resources. */
   private final Closer mCloser;
   private final long mBlockSize;
@@ -85,6 +85,7 @@ public class AlluxioFileOutStream extends FileOutStream {
   private boolean mShouldCacheCurrentBlock;
   private BlockOutStream mCurrentBlockOutStream;
   private final List<BlockOutStream> mPreviousBlockOutStreams;
+  private List<BlockOutStream>blockOutStreams;
 
   protected final AlluxioURI mUri;
 
@@ -115,7 +116,8 @@ public class AlluxioFileOutStream extends FileOutStream {
       mCanceled = false;
       mShouldCacheCurrentBlock = mAlluxioStorageType.isStore();
       mBytesWritten = 0;
-
+      nativeTwoTone = new Native_TWO_TONE();
+      blockOutStreams = new ArrayList<>();
       if (!mUnderStorageType.isSyncPersist()) {
         mUnderStorageOutputStream = null;
       } else { // Write is through to the under storage, create mUnderStorageOutputStream.
@@ -197,6 +199,9 @@ public class AlluxioFileOutStream extends FileOutStream {
           for (BlockOutStream bos : mPreviousBlockOutStreams) {
             bos.close();
           }
+          for(BlockOutStream two_tone_block : blockOutStreams){
+            two_tone_block.close();
+          }
         }
       }
 
@@ -253,7 +258,7 @@ public class AlluxioFileOutStream extends FileOutStream {
     if (mShouldCacheCurrentBlock) {
       try {
         if (mCurrentBlockOutStream == null || mCurrentBlockOutStream.remaining() == 0) {
-          getNextBlock();
+          getNextBlock(new ArrayList<>());
         }
         mCurrentBlockOutStream.write(b);
       } catch (IOException e) {
@@ -268,9 +273,7 @@ public class AlluxioFileOutStream extends FileOutStream {
     mBytesWritten++;
   }
 
-  private List<BlockOutStream> two_tone(List<BlockOutStream>copy){
-    return new ArrayList<>();
-  }
+
 
   private void writeInternal(byte[] b, int off, int len) throws IOException {
     Preconditions.checkArgument(b != null, PreconditionMessage.ERR_WRITE_BUFFER_NULL);
@@ -302,13 +305,6 @@ public class AlluxioFileOutStream extends FileOutStream {
       }
     }
     //TODO: file已经分块到blockIds里面了,冗余放磁盘,在close方法里面制造冗余块
-    //TODO 或者直接在旧块满时复制一份
-    //TODO 提交冗余块，绑定file
-
-
-
-    //blockOutStream只有写没有读，不能用
-    List<BlockOutStream>copyStreams = new ArrayList<>(mPreviousBlockOutStreams);
     Map<WorkerNetAddress, Long> mFailedWorkers = new HashMap<>();
     InStreamOptions inStreamOptions = new InStreamOptions();
     List<BlockInStream>blockInStreams = new ArrayList<>();
@@ -318,17 +314,16 @@ public class AlluxioFileOutStream extends FileOutStream {
     }
 
 
+    int i=0;
+    while(i<3){
+      i++;
+      blockOutStreams.add(mBlockStore.getOutStream(getNextBlockId(), mBlockSize, mOptions));
+    }
+    blockOutStreams = nativeTwoTone.create(blockInStreams, blockOutStreams);
+    //TODO: close的时候把分配的三个id和之前的八个id一起提交，不用修改元数据，冗余块就是最后的三个
 
-
-
-
-
-    if(mCurrentBlockOutStream!=null)copyStreams.add(mCurrentBlockOutStream);
-    //TODO 调api获得冗余块 申请新块和赋值过程和写一样
-    List<BlockOutStream>two_tone_Streams = two_tone(copyStreams);
-    //TODO 提交块
-
-
+    //应该是第一个节点存所有数据，三个冗余块存入其余节点
+    //恢复时可以通过其余内存层面的节点找冗余块复原
     if (mUnderStorageType.isSyncPersist()) {
       mUnderStorageOutputStream.write(b, off, len);
       Metrics.BYTES_WRITTEN_UFS.inc(len);
@@ -359,6 +354,7 @@ public class AlluxioFileOutStream extends FileOutStream {
       return masterClient.get().getNewBlockIdForFile(mUri);
     }
   }
+  
 
   private void handleCacheWriteException(Exception e) throws IOException {
     LOG.warn("Failed to write into AlluxioStore, canceling write attempt.", e);
