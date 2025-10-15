@@ -6,6 +6,7 @@ import alluxio.client.block.stream.DataWriter;
 
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -15,18 +16,42 @@ public class Native_TWO_TONE {
         System.load("C:/Users/25048/Downloads/shift_xor_2023/blockrecovery.dll");
     }
 
-    public native void processStreams(InputStream[] inputs, OutputStream[] outputs);
+    public native void processStreams(byte[] input, byte[] output);
 
-    public List<BlockOutStream> create(List<BlockInStream> blockInStreams,List<BlockOutStream> blockOutStreams) {
+    public native void recoverBuffer(byte[] buffer);
 
-        InputStream[] inputs = blockInStreams.stream()
-                .map(in -> (InputStream) in)
-                .toArray(InputStream[]::new);
+    public byte[] create(byte[] b) {
+        byte[]output = new byte[3072];
+        processStreams(b,output);
+        return output;
+    }
 
-        OutputStream[] outputs = blockOutStreams.stream()
-                .map(out -> (OutputStream) out)
-                .toArray(OutputStream[]::new);
-        processStreams(inputs,outputs);
-        return blockOutStreams;
+    public void recover(ByteBuffer buf) {
+        int pos = buf.position();
+        int lim = buf.limit();
+        int len = lim - pos;
+        if (len <= 0) return;
+
+        byte[] tmp;
+
+        if (buf.hasArray()) {
+            // 堆内缓冲：可以直接拿到底层数组 + 偏移
+            byte[] arr = buf.array();
+            int base = buf.arrayOffset() + pos;
+            recoverBuffer(arr);  // 直接原地修改
+        } else {
+            // 直接缓冲或无数组：先拷到临时数组，JNI 改完再写回
+            tmp = new byte[len];
+            // 复制 [pos, lim) 到 tmp
+            ByteBuffer dup = buf.duplicate();
+            dup.position(pos).limit(lim);
+            dup.get(tmp);               // 读出
+
+            // 调 JNI 修改 tmp
+            recoverBuffer(tmp);
+            // 写回原 buffer 的相同区间
+            dup.clear().position(pos).limit(lim);
+            dup.put(tmp);
+        }
     }
 }

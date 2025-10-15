@@ -258,7 +258,7 @@ public class AlluxioFileOutStream extends FileOutStream {
     if (mShouldCacheCurrentBlock) {
       try {
         if (mCurrentBlockOutStream == null || mCurrentBlockOutStream.remaining() == 0) {
-          getNextBlock(new ArrayList<>());
+          getNextBlock();
         }
         mCurrentBlockOutStream.write(b);
       } catch (IOException e) {
@@ -280,15 +280,13 @@ public class AlluxioFileOutStream extends FileOutStream {
     Preconditions.checkArgument(off >= 0 && len >= 0 && len + off <= b.length,
         PreconditionMessage.ERR_BUFFER_STATE.toString(), b.length, off, len);
 
-    List<Long>blockIds = new ArrayList<>();
     if (mShouldCacheCurrentBlock) {
       try {
         int tLen = len;
         int tOff = off;
         while (tLen > 0) {
-          //TODO 换新块时保存这些块id,等文件完全写入根据这些id制造冗余块
           if (mCurrentBlockOutStream == null || mCurrentBlockOutStream.remaining() == 0) {
-            getNextBlock(blockIds);
+            getNextBlock();
           }
           long currentBlockLeftBytes = mCurrentBlockOutStream.remaining();
           if (currentBlockLeftBytes >= tLen) {
@@ -305,24 +303,23 @@ public class AlluxioFileOutStream extends FileOutStream {
       }
     }
     //TODO: file已经分块到blockIds里面了,冗余放磁盘,在close方法里面制造冗余块
-    Map<WorkerNetAddress, Long> mFailedWorkers = new HashMap<>();
-    InStreamOptions inStreamOptions = new InStreamOptions();
-    List<BlockInStream>blockInStreams = new ArrayList<>();
-    for(Long blockId:blockIds) {
-       BlockInStream mBlockInStream = mBlockStore.getInStream(blockId,inStreamOptions , mFailedWorkers);
-       blockInStreams.add(mBlockInStream);
-    }
-
-
+    //TODO: 直接传buf，让c++切
     int i=0;
     while(i<3){
       i++;
       blockOutStreams.add(mBlockStore.getOutStream(getNextBlockId(), mBlockSize, mOptions));
     }
-    blockOutStreams = nativeTwoTone.create(blockInStreams, blockOutStreams);
+    byte[]two_tone_block = nativeTwoTone.create(b);
     //TODO: close的时候把分配的三个id和之前的八个id一起提交，不用修改元数据，冗余块就是最后的三个
+    int pos = 0;
+    int offset = 1024;
+    for(int j=0;j<3;j++){
+      BlockOutStream blockOutStream = blockOutStreams.get(j);
+      blockOutStream.write(two_tone_block,pos,offset);
+      pos+=offset;
+    }
 
-    //应该是第一个节点存所有数据，三个冗余块存入其余节点
+    //TODO 应该是第一个节点存所有数据，三个冗余块存入其余节点
     //恢复时可以通过其余内存层面的节点找冗余块复原
     if (mUnderStorageType.isSyncPersist()) {
       mUnderStorageOutputStream.write(b, off, len);
@@ -331,7 +328,7 @@ public class AlluxioFileOutStream extends FileOutStream {
     mBytesWritten += len;
   }
 
-  private void getNextBlock(List<Long>blockIds) throws IOException {
+  private void getNextBlock() throws IOException {
     if (mCurrentBlockOutStream != null) {
       Preconditions.checkState(mCurrentBlockOutStream.remaining() <= 0,
           "The current block still has space left, no need to get new block");
@@ -341,7 +338,6 @@ public class AlluxioFileOutStream extends FileOutStream {
 
     if (mAlluxioStorageType.isStore()) {
       long newId = getNextBlockId();
-      blockIds.add(newId);
       mCurrentBlockOutStream =
           mBlockStore.getOutStream(newId, mBlockSize, mOptions);
       mShouldCacheCurrentBlock = true;

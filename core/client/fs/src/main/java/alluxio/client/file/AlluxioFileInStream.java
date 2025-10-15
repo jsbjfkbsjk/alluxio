@@ -83,6 +83,7 @@ public class AlluxioFileInStream extends FileInStream {
   private final FileSystemContext mContext;
   private final boolean mPassiveCachingEnabled;
   private final long mStatusOutdatedTime;
+  private Native_TWO_TONE nativeTwoTone;
 
   /* Convenience values derived from mStatus, use these instead of querying mStatus. */
   /** Length of the file in bytes. */
@@ -141,6 +142,7 @@ public class AlluxioFileInStream extends FileInStream {
       mBlockInStream = null;
       mCachedPositionedReadStream = null;
       mLastBlockIdCached = 0;
+      nativeTwoTone = new Native_TWO_TONE();
     } catch (Throwable t) {
       // If there is any exception, including RuntimeException such as thrown by conf.getBoolean,
       // release the acquired resource, otherwise, FileSystemContext reinitialization will be
@@ -201,19 +203,39 @@ public class AlluxioFileInStream extends FileInStream {
     IOException lastException = null;
     while (bytesLeft > 0 && mPosition != mLength && retry.attempt()) {
       try {
-        updateStream();
-        int bytesRead = mBlockInStream.read(byteBuffer, currentOffset, bytesLeft);
-        if (bytesRead > 0) {
-          bytesLeft -= bytesRead;
-          currentOffset += bytesRead;
-          mPosition += bytesRead;
+        int index = updateStream();
+        if(index<5) {
+          int bytesRead = mBlockInStream.read(byteBuffer, currentOffset, bytesLeft);
+          if (bytesRead > 0) {
+            bytesLeft -= bytesRead;
+            currentOffset += bytesRead;
+            mPosition += bytesRead;
+          }
+          retry = mRetryPolicySupplier.get();
+          lastException = null;
+          if (mBlockInStream.remaining() == 0) {
+            closeBlockInStream(mBlockInStream);
+          }
         }
-        retry = mRetryPolicySupplier.get();
-        lastException = null;
-        if (mBlockInStream.remaining() == 0) {
-          closeBlockInStream(mBlockInStream);
+        else{
+          //TODO: 只读取前五块，然后直接通过冗余块复原
+          //TODO: 前五块在byteBuffer数组
+          //TODO: 后三块是冗余块直接也放进数组
+          for(int i=3;i>=1;i--) {
+            long blockId = mStatus.getBlockIds().get(11 - i);//直接写死
+            BlockInfo blockInfo = mStatus.getBlockInfo(blockId);
+            mBlockInStream = mBlockStore.getInStream(blockInfo, mOptions, mFailedWorkers);
+            int bytesRead = mBlockInStream.read(byteBuffer, currentOffset, bytesLeft);
+            if (bytesRead > 0) {
+              bytesLeft -= bytesRead;
+              currentOffset += bytesRead;
+              mPosition += bytesRead;
+            }
+          }
+          nativeTwoTone.recover(byteBuffer);
         }
       } catch (IOException e) {
+        //TODO 通过status得到id集合找到倒数后三个id（冗余块），然后恢复（假设丢三个块）或者直接改造，读前五个块和冗余块直接复原文件
         lastException = e;
         if (mBlockInStream != null) {
           handleRetryableException(mBlockInStream, e);
@@ -382,9 +404,9 @@ public class AlluxioFileInStream extends FileInStream {
    * Initializes the underlying block stream if necessary. This method must be called before
    * reading from mBlockInStream.
    */
-  private void updateStream() throws IOException {
+  private int updateStream() throws IOException {
     if (mBlockInStream != null && mBlockInStream.remaining() > 0) { // can still read from stream
-      return;
+      return -1;
     }
 
     if (mBlockInStream != null && mBlockInStream.remaining() == 0) { // current stream is done
@@ -423,6 +445,7 @@ public class AlluxioFileInStream extends FileInStream {
     // Set the stream to the correct position.
     long offset = mPosition % mBlockSize;
     mBlockInStream.seek(offset);
+    return Math.toIntExact(mPosition / mBlockSize);//TODO:返回当前读到第几块
   }
 
   /**
