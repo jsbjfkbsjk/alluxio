@@ -17,17 +17,14 @@ import alluxio.client.AlluxioStorageType;
 import alluxio.client.UnderStorageType;
 import alluxio.client.block.BlockStoreClient;
 import alluxio.client.block.policy.options.GetWorkerOptions;
-import alluxio.client.block.stream.BlockInStream;
 import alluxio.client.block.stream.BlockOutStream;
 import alluxio.client.block.stream.UnderFileSystemFileOutStream;
-import alluxio.client.file.options.InStreamOptions;
 import alluxio.client.file.options.OutStreamOptions;
 import alluxio.conf.AlluxioConfiguration;
 import alluxio.conf.PropertyKey;
 import alluxio.exception.ExceptionMessage;
 import alluxio.exception.PreconditionMessage;
 import alluxio.exception.status.UnavailableException;
-import alluxio.grpc.Block;
 import alluxio.grpc.CompleteFilePOptions;
 import alluxio.grpc.FileSystemMasterCommonPOptions;
 import alluxio.metrics.MetricKey;
@@ -50,9 +47,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -68,7 +63,7 @@ import javax.annotation.concurrent.ThreadSafe;
 @NotThreadSafe
 public class AlluxioFileOutStream extends FileOutStream {
   private static final Logger LOG = LoggerFactory.getLogger(AlluxioFileOutStream.class);
-  private final Native_TWO_TONE nativeTwoTone;
+  private final NativeTWOTONE nativeTwoTone;
   /** Used to manage closeable resources. */
   private final Closer mCloser;
   private final long mBlockSize;
@@ -116,7 +111,7 @@ public class AlluxioFileOutStream extends FileOutStream {
       mCanceled = false;
       mShouldCacheCurrentBlock = mAlluxioStorageType.isStore();
       mBytesWritten = 0;
-      nativeTwoTone = new Native_TWO_TONE();
+      nativeTwoTone = new NativeTWOTONE();
       blockOutStreams = new ArrayList<>();
       if (!mUnderStorageType.isSyncPersist()) {
         mUnderStorageOutputStream = null;

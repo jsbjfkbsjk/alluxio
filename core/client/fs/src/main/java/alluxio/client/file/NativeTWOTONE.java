@@ -1,19 +1,11 @@
 package alluxio.client.file;
 
-import alluxio.client.block.stream.BlockInStream;
-import alluxio.client.block.stream.BlockOutStream;
-import alluxio.client.block.stream.DataWriter;
-
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.List;
 
-public class Native_TWO_TONE {
+public class NativeTWOTONE {
     // 加载 C++ 共享库
     static {
-        System.load("C:/Users/25048/Downloads/shift_xor_2023/blockrecovery.dll");
+        System.load("/root/libshift_xor.so");
     }
 
     public native void processStreams(byte[] input, byte[] output);

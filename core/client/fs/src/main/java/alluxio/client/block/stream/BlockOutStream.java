@@ -22,6 +22,7 @@ import com.google.common.io.Closer;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
+import lombok.Data;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -36,6 +37,7 @@ import javax.annotation.concurrent.NotThreadSafe;
  * streams data chunk by chunk.
  */
 @NotThreadSafe
+@Data
 public class BlockOutStream extends OutputStream implements BoundedStream, Cancelable {
 
   private final Closer mCloser;

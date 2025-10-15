@@ -12,6 +12,7 @@
 package alluxio.wire;
 
 import alluxio.annotation.PublicApi;
+import lombok.Data;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
@@ -27,12 +28,15 @@ import javax.annotation.concurrent.NotThreadSafe;
  */
 @PublicApi
 @NotThreadSafe
+@Data
 public final class BlockInfo implements Serializable {
   private static final long serialVersionUID = 5646834366222004646L;
 
   private long mBlockId;
   private long mLength;
   private ArrayList<BlockLocation> mLocations = new ArrayList<>();
+  private boolean isOrigin = true;
+  private List<Long> replicaIds = new ArrayList<>();//根据这个找到副本并还原
 
   /**
    * Creates a new instance of {@link BlockInfo}.

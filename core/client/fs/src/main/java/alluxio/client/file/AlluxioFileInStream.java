@@ -83,7 +83,7 @@ public class AlluxioFileInStream extends FileInStream {
   private final FileSystemContext mContext;
   private final boolean mPassiveCachingEnabled;
   private final long mStatusOutdatedTime;
-  private Native_TWO_TONE nativeTwoTone;
+  private NativeTWOTONE nativeTwoTone;
 
   /* Convenience values derived from mStatus, use these instead of querying mStatus. */
   /** Length of the file in bytes. */
@@ -142,7 +142,7 @@ public class AlluxioFileInStream extends FileInStream {
       mBlockInStream = null;
       mCachedPositionedReadStream = null;
       mLastBlockIdCached = 0;
-      nativeTwoTone = new Native_TWO_TONE();
+      nativeTwoTone = new NativeTWOTONE();
     } catch (Throwable t) {
       // If there is any exception, including RuntimeException such as thrown by conf.getBoolean,
       // release the acquired resource, otherwise, FileSystemContext reinitialization will be
