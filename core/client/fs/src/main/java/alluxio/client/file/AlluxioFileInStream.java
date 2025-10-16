@@ -220,19 +220,28 @@ public class AlluxioFileInStream extends FileInStream {
         else{
           //TODO: 只读取前五块，然后直接通过冗余块复原
           //TODO: 前五块在byteBuffer数组
-          //TODO: 后三块是冗余块直接也放进数组
-          for(int i=3;i>=1;i--) {
-            long blockId = mStatus.getBlockIds().get(11 - i);//直接写死
+          //TODO: 后四块是冗余块直接也放进数组
+          //buffer传入的buffer应该偏大（文件大小包含了冗余块）
+          byte[] two_tone_block = new byte[1184*3];
+          int readIndex = 0;
+          int offset = 1024;
+          for(int i=4;i>=1;i--) {
+            long blockId = mStatus.getBlockIds().get(12 - i);//直接写死
             BlockInfo blockInfo = mStatus.getBlockInfo(blockId);
             mBlockInStream = mBlockStore.getInStream(blockInfo, mOptions, mFailedWorkers);
-            int bytesRead = mBlockInStream.read(byteBuffer, currentOffset, bytesLeft);
-            if (bytesRead > 0) {
-              bytesLeft -= bytesRead;
-              currentOffset += bytesRead;
-              mPosition += bytesRead;
+            if(readIndex+offset<two_tone_block.length) {
+              mBlockInStream.read(two_tone_block, readIndex, offset);
+              readIndex+=offset;
             }
+            else{
+              mBlockInStream.read(two_tone_block,readIndex,two_tone_block.length-readIndex);
+            }
+
+
           }
-          nativeTwoTone.recover(byteBuffer);
+          mPosition = mLength;
+          nativeTwoTone.recover(byteBuffer,two_tone_block);
+          break;
         }
       } catch (IOException e) {
         //TODO 通过status得到id集合找到倒数后三个id（冗余块），然后恢复（假设丢三个块）或者直接改造，读前五个块和冗余块直接复原文件

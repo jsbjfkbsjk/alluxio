@@ -300,7 +300,7 @@ public class AlluxioFileOutStream extends FileOutStream {
     //TODO: file已经分块到blockIds里面了,冗余放磁盘,在close方法里面制造冗余块
     //TODO: 直接传buf，让c++切
     int i=0;
-    while(i<3){
+    while(i<4){
       i++;
       blockOutStreams.add(mBlockStore.getOutStream(getNextBlockId(), mBlockSize, mOptions));
     }
@@ -308,13 +308,18 @@ public class AlluxioFileOutStream extends FileOutStream {
     //TODO: close的时候把分配的三个id和之前的八个id一起提交，不用修改元数据，冗余块就是最后的三个
     int pos = 0;
     int offset = 1024;
-    for(int j=0;j<3;j++){
+    for(int j=0;j<4;j++){
       BlockOutStream blockOutStream = blockOutStreams.get(j);
-      blockOutStream.write(two_tone_block,pos,offset);
-      pos+=offset;
+      if(pos+offset<two_tone_block.length) {
+        blockOutStream.write(two_tone_block, pos, offset);
+        pos += offset;
+      }
+      else{
+        blockOutStream.write(two_tone_block,pos,two_tone_block.length-pos);
+      }
     }
 
-    //TODO 应该是第一个节点存所有数据，三个冗余块存入其余节点
+    //TODO 应该是第一个节点存所有数据，4 个冗余块存入其余节点
     //恢复时可以通过其余内存层面的节点找冗余块复原
     if (mUnderStorageType.isSyncPersist()) {
       mUnderStorageOutputStream.write(b, off, len);
